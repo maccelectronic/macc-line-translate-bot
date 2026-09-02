@@ -27,7 +27,7 @@
 Run:
 
 ```bash
-rg -n 'TBD|TODO|implement later|fill in details' docs/superpowers/plans/2026-09-02-github-publication.md
+rg -n 'T[B]D|T[O]DO|implement l[a]ter|fill in d[e]tails' docs/superpowers/plans/2026-09-02-github-publication.md
 ```
 
 Expected: no matches.
