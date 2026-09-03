@@ -92,10 +92,24 @@ import re
 import subprocess
 import sys
 
-approved = {
+placeholders = {
     "LINE_CHANNEL_ACCESS_TOKEN": "LINE_CHANNEL_ACCESS_TOKEN=your_line_channel_access_token_here",
     "LINE_CHANNEL_SECRET": "LINE_CHANNEL_SECRET=your_line_channel_secret_here",
     "GEMINI_API_KEY": "GEMINI_API_KEY=your_gemini_api_key_here",
+}
+allowed_assignments = {
+    (".env.example", placeholders["LINE_CHANNEL_ACCESS_TOKEN"]): "LINE_CHANNEL_ACCESS_TOKEN",
+    (".env.example", placeholders["LINE_CHANNEL_SECRET"]): "LINE_CHANNEL_SECRET",
+    (".env.example", placeholders["GEMINI_API_KEY"]): "GEMINI_API_KEY",
+    ("README.md", placeholders["LINE_CHANNEL_ACCESS_TOKEN"]): "LINE_CHANNEL_ACCESS_TOKEN",
+    ("README.md", placeholders["LINE_CHANNEL_SECRET"]): "LINE_CHANNEL_SECRET",
+    ("README.md", placeholders["GEMINI_API_KEY"]): "GEMINI_API_KEY",
+    ("README_TH.md", placeholders["LINE_CHANNEL_ACCESS_TOKEN"]): "LINE_CHANNEL_ACCESS_TOKEN",
+    ("README_TH.md", placeholders["LINE_CHANNEL_SECRET"]): "LINE_CHANNEL_SECRET",
+    ("README_TH.md", placeholders["GEMINI_API_KEY"]): "GEMINI_API_KEY",
+    ("config.py", 'LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")'): "LINE_CHANNEL_ACCESS_TOKEN",
+    ("config.py", 'LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")'): "LINE_CHANNEL_SECRET",
+    ("config.py", 'GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")'): "GEMINI_API_KEY",
 }
 staged_bytes = subprocess.check_output(
     ["git", "diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"]
@@ -110,7 +124,7 @@ else:
         ["git", "show", ":.env.example"], stderr=subprocess.DEVNULL
     ).decode("utf-8", errors="replace")
     env_lines = env_text.splitlines()
-    for key, exact_line in approved.items():
+    for key, exact_line in placeholders.items():
         if env_lines.count(exact_line) != 1:
             failures.append(f".env.example: expected exactly one approved placeholder for {key}")
 
@@ -126,7 +140,7 @@ for path in staged:
     for line_number, line in enumerate(content.splitlines(), start=1):
         for match in assignment.finditer(line):
             key = match.group(1)
-            if line.strip() != approved[key]:
+            if allowed_assignments.get((path, line.strip())) != key:
                 failures.append(f"{path}:{line_number}: disallowed assignment for {key}")
         if gemini_token.search(line):
             failures.append(f"{path}:{line_number}: value matches a Gemini API-key format")
@@ -141,7 +155,7 @@ print(f"Secret scan passed for {len(staged)} staged files.")
 PY
 ```
 
-Expected: exit code 0 and exactly `Secret scan passed for 8 staged files.` The check reads the complete indexed content of all eight staged files, including Markdown; requires exactly one approved assignment for each of the three placeholders in `.env.example`; rejects every other staged assignment to those names; and rejects any value matching the Gemini `AIza...` key format. Failure output identifies only the file, line number, and credential name or format, never the value.
+Expected: exit code 0 and exactly `Secret scan passed for 8 staged files.` The check reads the complete indexed content of all eight staged files, including Markdown; requires exactly one approved assignment for each of the three placeholders in `.env.example`; and permits protected-name assignments only at the exact path-and-line entries in the allowlist: three placeholders in `.env.example`, the same three approved documentation examples in `README.md`, the same three approved documentation examples in `README_TH.md`, and the three exact `config.py` `os.getenv(...)` assignments. Every other staged assignment to those names fails. Any value matching the Gemini `AIza...` key format fails globally in every staged file. Failure output identifies only the file, line number, and credential name or format, never the value.
 
 - [ ] **Step 5: Configure the repository-local commit identity**
 
