@@ -11,6 +11,13 @@
 - [项目目录结构](#-项目目录结构)
 - [核心模块说明](#-核心模块说明)
 - [环境变量配置 (.env)](#-环境变量配置-env)
+  - [快速开始](#快速开始)
+  - [变量说明](#变量说明)
+  - [首次启动检查](#首次启动检查)
+  - [换电脑时的设置](#换电脑时的设置)
+  - [安全规则](#安全规则)
+  - [如果密钥疑似泄露](#如果密钥疑似泄露)
+  - [常见问题排查](#常见问题排查)
 - [安装与启动指南](#-安装与启动指南)
 - [LINE 群聊部署关键设置](#-line-群聊部署关键设置)
 - [日常维护与测试命令](#-日常维护与测试命令)
@@ -26,15 +33,15 @@ flowchart TD
     C -->|验证 X-Line-Signature 签名| D{签名是否合法?}
     D -- 否 --> E[返回 400 Bad Request]
     D -- 是 --> F["翻译处理核心 (translator.py)"]
-    
+
     F -->|过滤指令与链接 / ! # http| G{是否需要翻译?}
     G -- 否 (指令/纯英数/纯链接) --> H[静默忽略，不打扰群组]
     G -- 是 (含中文或泰文) --> I["调用 Google Gemini API"]
-    
+
     I -->|主模型: gemini-3.7-flash| J{API 请求状态}
     J -- 成功 --> K[获取翻译结果]
     J -- 异常/额度耗尽 --> L["自动降级备用模型 (gemini-3.1-flash-lite)"] --> K
-    
+
     K --> M[添加国旗标识 🇹🇭 / 🇨🇳]
     M -->|LINE Messaging API 回复| B
     B -->|推送翻译消息至群组| A
@@ -71,38 +78,75 @@ translate_bot/
 
 ## 🔑 环境变量配置 (.env)
 
-复制 `.env.example` 为 `.env` 并填写对应密钥：
+### 快速开始
 
-```ini
-# ==========================================
-# LINE Bot 配置 / การตั้งค่า LINE Bot
-# ==========================================
-# LINE Developers Console -> Messaging API -> Channel access token (long-lived)
-LINE_CHANNEL_ACCESS_TOKEN=your_line_channel_access_token_here
+第一次使用时，在项目目录执行：
 
-# LINE Developers Console -> Basic settings -> Channel secret
-LINE_CHANNEL_SECRET=your_line_channel_secret_here
-
-# ==========================================
-# Gemini AI 配置 / การตั้งค่า Gemini AI
-# ==========================================
-# Google AI Studio 获取 API Key (https://aistudio.google.com/)
-GEMINI_API_KEY=your_gemini_api_key_here
-
-# 主要翻译模型（当前推荐 gemini-3.7-flash）
-GEMINI_MODEL=gemini-3.7-flash
-
-# 备用容错模型（当主模型遇到 404 或限额时自动启用）
-GEMINI_FALLBACK_MODEL=gemini-3.1-flash-lite
-
-# ==========================================
-# 服务器配置 / การตั้งค่าเซิร์ฟเวอร์
-# ==========================================
-SERVER_HOST=0.0.0.0
-SERVER_PORT=8000
+```bash
+cp .env.example .env
+chmod 600 .env
 ```
 
----
+用文本编辑器打开 `.env`，只在本机填写真实密钥。不要把真实密钥放入 README、Issue 或聊天记录。
+
+### 变量说明
+
+| 变量 | 必填 | 用途 | 从哪里取得/如何修改 |
+| :--- | :--- | :--- | :--- |
+| `LINE_CHANNEL_ACCESS_TOKEN` | 是 | LINE Messaging API 的访问令牌 | LINE Developers Console → Messaging API |
+| `LINE_CHANNEL_SECRET` | 是 | 验证 LINE Webhook 签名 | LINE Developers Console → Basic settings |
+| `GEMINI_API_KEY` | 是 | 调用 Google Gemini 翻译 | Google AI Studio |
+| `GEMINI_MODEL` | 否 | 主要翻译模型；默认 `gemini-3.7-flash` | 修改 `.env` 中的模型名称 |
+| `GEMINI_FALLBACK_MODEL` | 否 | 主模型失败时使用的备用模型；默认 `gemini-3.1-flash-lite` | 修改 `.env` 中的模型名称 |
+| `SERVER_HOST` | 否 | 服务监听地址；默认 `0.0.0.0` | 通常保持默认值 |
+| `SERVER_PORT` | 否 | 服务端口；默认 `8000` | 端口被占用时修改为其他数字 |
+
+### 首次启动检查
+
+先检查必要配置，再启动机器人：
+
+```bash
+./venv/bin/python -c "import config; config.validate_config()"
+./venv/bin/python main.py
+```
+
+如果提示缺少变量，请回到 `.env` 补齐前三个必填值。检查时不要打印或复制密钥内容。
+
+### 换电脑时的设置
+
+在新电脑上克隆项目并创建本地配置：
+
+```bash
+git clone https://github.com/maccelectronic/macc-line-translate-bot.git
+cd macc-line-translate-bot
+cp .env.example .env
+chmod 600 .env
+```
+
+然后从密码管理器或安全备份中恢复密钥到 `.env`。GitHub 仓库故意不包含 `.env`，所以不能从 GitHub 下载密钥。
+
+### 安全规则
+
+- 永远不要执行 `git add .env`；提交前用 `git status` 确认 `.env` 未被追踪。
+- 可用以下命令检查 `.env` 是否被忽略，不会显示密钥值：
+  ```bash
+  git status --ignored --short .env
+  ```
+- 不要把密钥粘贴到 README、Issue、聊天或截图中。
+- 如果权限不是仅所有者可读写，请执行 `chmod 600 .env`。
+
+### 如果密钥疑似泄露
+
+立即在 LINE Developers Console 和 Google AI Studio 撤销并重新生成对应密钥，更新本机 `.env` 后重启机器人。如果密钥曾经提交到 Git，不能只删除文件，必须先轮换密钥并清理 Git 历史。
+
+### 常见问题排查
+
+- `.env` 不存在：重新执行 `cp .env.example .env`。
+- 必填值为空：填写 `LINE_CHANNEL_ACCESS_TOKEN`、`LINE_CHANNEL_SECRET` 和 `GEMINI_API_KEY`，然后重新运行配置检查。
+- 权限过宽：执行 `chmod 600 .env`。
+- 端口被占用：修改 `SERVER_PORT`，再重新启动。
+
+下面是完整配置示例（仅使用占位符，不要直接填入真实密钥）：
 
 ## 🚀 安装与启动指南
 
