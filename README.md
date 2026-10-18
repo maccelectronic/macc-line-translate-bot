@@ -2,7 +2,7 @@
 
 [🇹🇭 ภาษาไทย (README_TH.md)](./README_TH.md) | [🇨🇳 简体中文 (README.md)](./README.md)
 
-基于 **Flask** 与 **Google Gemini 3.7 Flash** 构建的 LINE 智能翻译机器人。专为 **LINE 群聊 (Group Chat)** 与私聊场景深度优化，实现简体中文与泰语之间的自动语系识别与流畅双向翻译。
+基于 **Flask** 与 **Google Gemini 3.8 Flash** 构建的 LINE 智能翻译机器人。专为 **LINE 群聊 (Group Chat)** 与私聊场景深度优化，实现简体中文与泰语之间的自动语系识别与流畅双向翻译。
 
 ---
 
@@ -38,7 +38,7 @@ flowchart TD
     G -- 否 (指令/纯英数/纯链接) --> H[静默忽略，不打扰群组]
     G -- 是 (含中文或泰文) --> I["调用 Google Gemini API"]
 
-    I -->|主模型: gemini-3.7-flash| J{API 请求状态}
+    I -->|主模型: gemini-3.8-flash| J{API 请求状态}
     J -- 成功 --> K[获取翻译结果]
     J -- 异常/额度耗尽 --> L["自动降级备用模型 (gemini-3.1-flash-lite)"] --> K
 
@@ -55,7 +55,7 @@ flowchart TD
 translate_bot/
 ├── config.py           # ⚙️ 全局配置与环境变量加载（含启动自检）
 ├── main.py             # 🚀 Webhook 服务器入口（Flask + LINE SDK v3）
-├── translator.py       # 🧠 语言识别、群聊噪声过滤与 Gemini 3.7 Flash 翻译引擎
+├── translator.py       # 🧠 语言识别、群聊噪声过滤与 Gemini 3.8 Flash 翻译引擎
 ├── .env                # 🔑 本地敏感密钥配置（禁止提交至 Git）
 ├── .env.example        # 📝 环境变量配置模板
 ├── requirements.txt    # 📦 Python 依赖包清单
@@ -71,7 +71,7 @@ translate_bot/
 | 文件名 | 职责说明 |
 | :--- | :--- |
 | **`main.py`** | 1. 启动 Flask HTTP 服务，监听 `/line/callback`。<br>2. 验证 LINE 消息签名 (`X-Line-Signature`)。<br>3. 接收并解析 `MessageEvent`，调用翻译模块后通过 `reply_message` 自动回复。 |
-| **`translator.py`** | 1. **语言判断**：通过正则表达式检测泰文字符 (`\u0e00-\u0e7f`) 与中文字符 (`\u4e00-\u9fa5`)。<br>2. **群聊降噪**：自动忽略以 `/`、`!`、`#` 开头的指令及网页链接，防止群聊刷屏。<br>3. **AI 翻译**：封装 `GeminiTranslator`，使用 `gemini-3.7-flash` 模型进行高质量中泰双向互译，内置备用模型故障自动转移。 |
+| **`translator.py`** | 1. **语言判断**：通过正则表达式检测泰文字符 (`\u0e00-\u0e7f`) 与中文字符 (`\u4e00-\u9fa5`)。<br>2. **群聊降噪**：自动忽略以 `/`、`!`、`#` 开头的指令及网页链接，防止群聊刷屏。<br>3. **AI 翻译**：封装 `GeminiTranslator`，使用 `gemini-3.8-flash` 模型进行高质量中泰双向互译，内置备用模型故障自动转移。 |
 | **`config.py`** | 1. 集中管理 LINE Token、Secret、Gemini API Key、模型名称及端口。<br>2. 提供 `validate_config()` 函数在启动时校验必要参数。 |
 
 ---
@@ -96,7 +96,7 @@ chmod 600 .env
 | `LINE_CHANNEL_ACCESS_TOKEN` | 是 | LINE Messaging API 的访问令牌 | LINE Developers Console → Messaging API |
 | `LINE_CHANNEL_SECRET` | 是 | 验证 LINE Webhook 签名 | LINE Developers Console → Basic settings |
 | `GEMINI_API_KEY` | 是 | 调用 Google Gemini 翻译 | Google AI Studio |
-| `GEMINI_MODEL` | 否 | 主要翻译模型；默认 `gemini-3.7-flash` | 修改 `.env` 中的模型名称 |
+| `GEMINI_MODEL` | 否 | 主要翻译模型；默认 `gemini-3.8-flash` | 修改 `.env` 中的模型名称 |
 | `GEMINI_FALLBACK_MODEL` | 否 | 主模型失败时使用的备用模型；默认 `gemini-3.1-flash-lite` | 修改 `.env` 中的模型名称 |
 | `SERVER_HOST` | 否 | 服务监听地址；默认 `0.0.0.0` | 通常保持默认值 |
 | `SERVER_PORT` | 否 | 服务端口；默认 `8000` | 端口被占用时修改为其他数字 |
