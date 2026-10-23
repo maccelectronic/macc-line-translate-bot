@@ -5,6 +5,7 @@
 """
 import re
 from google import genai
+from google.genai import types
 import config
 
 
@@ -34,6 +35,9 @@ class GeminiTranslator:
         self.client = genai.Client(api_key=config.GEMINI_API_KEY)
         self.model = config.GEMINI_MODEL
         self.fallback_model = config.GEMINI_FALLBACK_MODEL
+        self.gen_config = types.GenerateContentConfig(
+            thinking_config=types.ThinkingConfig(thinking_budget=0)
+        )
 
     def translate(self, text: str, target_lang: str) -> str | None:
         """
@@ -57,7 +61,7 @@ Text to translate:
 """
         try:
             response = self.client.models.generate_content(
-                model=self.model, contents=prompt
+                model=self.model, contents=prompt, config=self.gen_config
             )
             if response.text:
                 result = response.text.strip()
@@ -71,7 +75,7 @@ Text to translate:
                 print(f"[Gemini 切换 / สลับโมเดล] 自动启用备用模型 / เปลี่ยนเป็นโมเดลสำรอง: {self.fallback_model}...")
                 try:
                     response = self.client.models.generate_content(
-                        model=self.fallback_model, contents=prompt
+                        model=self.fallback_model, contents=prompt, config=self.gen_config
                     )
                     if response.text:
                         result = response.text.strip()
