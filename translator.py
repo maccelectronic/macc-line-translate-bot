@@ -74,9 +74,14 @@ Text to translate:
             if "404" in str(e) or "not found" in str(e).lower() or "quota" in str(e).lower():
                 print(f"[Gemini 切换 / สลับโมเดล] 自动启用备用模型 / เปลี่ยนเป็นโมเดลสำรอง: {self.fallback_model}...")
                 try:
-                    response = self.client.models.generate_content(
-                        model=self.fallback_model, contents=prompt, config=self.gen_config
-                    )
+                    try:
+                        response = self.client.models.generate_content(
+                            model=self.fallback_model, contents=prompt, config=self.gen_config
+                        )
+                    except Exception:
+                        response = self.client.models.generate_content(
+                            model=self.fallback_model, contents=prompt
+                        )
                     if response.text:
                         result = response.text.strip()
                         if (result.startswith('"') and result.endswith('"')) or (result.startswith('“') and result.endswith('”')):
