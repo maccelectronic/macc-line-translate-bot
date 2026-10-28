@@ -8,6 +8,7 @@
 
 ## 📑 目录
 - [系统架构与业务流程](#-系统架构与业务流程)
+- [用户性别感知与精准敬语机制 (方案 1 + 方案 3)](#-用户性别感知与精准敬语机制-方案-1--方案-3)
 - [项目目录结构](#-项目目录结构)
 - [核心模块说明](#-核心模块说明)
 - [环境变量配置 (.env)](#-环境变量配置-env)
@@ -32,20 +33,49 @@ flowchart TD
     B -->|Webhook POST /line/callback| C["Flask 应用服务器 (main.py)"]
     C -->|验证 X-Line-Signature 签名| D{签名是否合法?}
     D -- 否 --> E[返回 400 Bad Request]
-    D -- 是 --> F["翻译处理核心 (translator.py)"]
+    D -- 是 --> F{是否为性别指令?\n'我是男生' / '我是女生'}
 
-    F -->|过滤指令与链接 / ! # http| G{是否需要翻译?}
-    G -- 否 (指令/纯英数/纯链接) --> H[静默忽略，不打扰群组]
-    G -- 是 (含中文或泰文) --> I["调用 Google Gemini API"]
+    F -- 是 (设置/查询指令) --> G[更新 SQLite 数据库 user_profiles.db]
+    G --> H[回复确认消息并结束]
 
-    I -->|主模型: gemini-3.8-flash| J{API 请求状态}
-    J -- 成功 --> K[获取翻译结果]
-    J -- 异常/额度耗尽 --> L["自动降级备用模型 (gemini-3.1-flash-lite)"] --> K
+    F -- 否 (普通文本) --> I{是否需要翻译?\n含中文或泰文}
+    I -- 否 (指令/纯英数/纯链接) --> J[静默忽略，不打扰群组]
+    I -- 是 --> K[获取用户性别: 本地 SQLite 缓存 / Gemini 多模态初次推断]
 
-    K --> M[添加国旗标识 🇹🇭 / 🇨🇳]
-    M -->|LINE Messaging API 回复| B
+    K --> L["调用 Google Gemini API (gemini-3.8-flash)"]
+    L --> M["注入性别敬语 (男: ครับ/ผม, 女: ค่ะ/ดิฉัน, 中性: ทางเรา/ครับ)"]
+    M --> N[获取高质量翻译结果]
+    N --> O[添加国旗标识 🇹🇭 / 🇨🇳]
+    O -->|LINE Messaging API 回复| B
     B -->|推送翻译消息至群组| A
 ```
+
+---
+
+## 🚻 用户性别感知与精准敬语机制 (方案 1 + 方案 3)
+
+泰语非常注重讲话人的性别（敬语词如 `ครับ/ค่ะ`、人称代词如 `ผม/ฉัน/ดิฉัน`）。本项目融合 **用户主动指令（方案 1）** 与 **AI 多模态自动分析（方案 3）**，实现免配置与高精准度的平衡：
+
+### 1. 用户交互指令（优先级最高）
+群成员可在群聊或私聊中直接向机器人发送指令：
+
+| 用户发送 | 机器人动作 | 机器人回复示例 |
+| :--- | :--- | :--- |
+| `我是男生` / `我是男` / `/male` / `ผมเป็นผู้ชาย` | 永久记住当前用户为 **男士** 👨 | `✅ 已记录您的性别为【男士】👨。后续翻译将适配男性专属敬语（ครับ / ผม）` |
+| `我是女生` / `我是女` / `/female` / `ฉันเป็นผู้หญิง` | 永久记住当前用户为 **女士** 👩 | `✅ 已记录您的性别为【女士】👩。后续翻译将适配女性专属敬语（ค่ะ / ดิฉัน / ฉัน）` |
+| `我的性别` / `/gender` / `เพศของฉัน` | 查询当前记录的性别与来源 | `ℹ️ 您当前登记的性别为：【男士】（来源：手动设置）` |
+| `重置性别` / `/gender reset` / `รีเซ็ตเพศ` | 清除手动设定，恢复自动推断 | `🔄 已重置性别设置，后续将恢复通过昵称/头像自动识别` |
+
+### 2. AI 多模态自动分析（零配置兜底）
+当未设定过性别的用户首次在群聊发言时：
+1. 自动通过 LINE Messaging API 获取用户资料（昵称与头像图片 URL）；
+2. 调用 **Gemini 3.8 Flash** 多模态模型，结合名字文化背景与头像视觉进行性别推断（置信度要求 $\ge 75\%$）；若为风景/宠物/卡通/LOGO 或无法确定，则回退为通用中性；
+3. 推断结果持久化写入本地 SQLite 数据库，**后续发言直接读取本地缓存（0.05ms），完全不影响翻译响应速度**。
+
+### 3. 精准敬语对应规则
+- **男士（`male`）**：使用男性礼貌结尾词 `ครับ`，第一人称代词使用 `ผม`；严禁女性语气词及斜杠双选。
+- **女士（`female`）**：使用女性礼貌语气词 `ค่ะ`（陈述/回答）或 `คะ`（疑问），第一人称使用 `ดิฉัน` 或 `ฉัน`；严禁男性敬语及斜杠双选。
+- **中性/未指定（`neutral`）**：使用通用商务敬语 `ครับ`，第一人称代词优先省略或使用 `ทาง我们`（`ทางเรา`），**严禁输出任何 `ครับ/ค่ะ`、`ผม/ฉัน` 等双拼选项**。
 
 ---
 
@@ -54,8 +84,11 @@ flowchart TD
 ```text
 translate_bot/
 ├── config.py           # ⚙️ 全局配置与环境变量加载（含启动自检）
-├── main.py             # 🚀 Webhook 服务器入口（Flask + LINE SDK v3）
-├── translator.py       # 🧠 语言识别、群聊噪声过滤与 Gemini 3.8 Flash 翻译引擎
+├── main.py             # 🚀 Webhook 服务器入口（Flask + LINE SDK v3 + 异步防重）
+├── translator.py       # 🧠 语言识别、多性别提示词注入与 Gemini 3.8 Flash 翻译引擎
+├── user_manager.py     # 🚻 用户性别持久化存储（SQLite）与 Gemini 多模态推断
+├── data/               # 💾 本地数据目录（user_profiles.db，已被 .gitignore 忽略）
+├── tests/              # 🧪 自动化测试套件（test_gender_system.py）
 ├── .env                # 🔑 本地敏感密钥配置（禁止提交至 Git）
 ├── .env.example        # 📝 环境变量配置模板
 ├── requirements.txt    # 📦 Python 依赖包清单
@@ -70,8 +103,9 @@ translate_bot/
 
 | 文件名 | 职责说明 |
 | :--- | :--- |
-| **`main.py`** | 1. 启动 Flask HTTP 服务，监听 `/line/callback`。<br>2. 验证 LINE 消息签名 (`X-Line-Signature`)。<br>3. 接收并解析 `MessageEvent`，调用翻译模块后通过 `reply_message` 自动回复。 |
-| **`translator.py`** | 1. **语言判断**：通过正则表达式检测泰文字符 (`\u0e00-\u0e7f`) 与中文字符 (`\u4e00-\u9fa5`)。<br>2. **群聊降噪**：自动忽略以 `/`、`!`、`#` 开头的指令及网页链接，防止群聊刷屏。<br>3. **AI 翻译**：封装 `GeminiTranslator`，使用 `gemini-3.8-flash` 模型进行高质量中泰双向互译，内置备用模型故障自动转移。 |
+| **`main.py`** | 1. 启动 Flask HTTP 服务，监听 `/line/callback`。<br>2. 验证 LINE 消息签名 (`X-Line-Signature`) 并以线程池异步处理，防 499 超时。<br>3. 拦截性别指令（`我是男生`、`我是女生` 等）直接中泰双语回复。<br>4. 普通消息调用 `user_manager` 提取或推断性别后传给翻译引擎。 |
+| **`translator.py`** | 1. **语言判断**：通过正则表达式检测泰文字符 (`\u0e00-\u0e7f`) 与中文字符 (`\u4e00-\u9fa5`)。<br>2. **群聊降噪**：自动忽略以 `/`、`!`、`#` 开头的指令及网页链接，防止群聊刷屏。<br>3. **AI 翻译**：封装 `GeminiTranslator`，根据用户性别动态注入专用敬语规范，杜绝思考残留与斜杠双选。 |
+| **`user_manager.py`** | 1. 本地 SQLite (`data/user_profiles.db`) 用户档案存储，支持手动设置与重置。<br>2. 首次发言基于昵称和头像图片调用 Gemini 3.8 Flash 多模态自动分析性别并入库。 |
 | **`config.py`** | 1. 集中管理 LINE Token、Secret、Gemini API Key、模型名称及端口。<br>2. 提供 `validate_config()` 函数在启动时校验必要参数。 |
 
 ---
@@ -195,11 +229,31 @@ ps aux | grep main.py
 
 ## 🛠️ 日常维护与测试命令
 
+- **运行全套自动化测试（数据库、性别推断、敬语输出）**：
+  ```bash
+  ./venv/bin/python tests/test_gender_system.py
+  ```
 - **测试环境变量与模型读取**：
   ```bash
   ./venv/bin/python -c "import config; print('当前模型:', config.GEMINI_MODEL)"
   ```
-- **测试翻译函数**：
+- **测试不同性别下的泰语敬语翻译**：
   ```bash
-  ./venv/bin/python -c "from translator import translate_message; print(translate_message('สวัสดีครับ ยินดีที่ได้รู้จัก'))"
+  ./venv/bin/python -c "
+  import translator
+  print('男士:', translator.translate_message('非常感谢，我现在通知工厂', gender='male'))
+  print('女士:', translator.translate_message('非常感谢，我现在通知工厂', gender='female'))
+  print('中性:', translator.translate_message('非常感谢，我现在通知工厂', gender='neutral'))
+  "
+  ```
+- **Systemd 系统服务管理**：
+  ```bash
+  # 重启翻译服务
+  sudo systemctl restart translate_bot.service
+
+  # 查看服务实时运行状态
+  sudo systemctl status translate_bot.service
+
+  # 实时查看系统运行日志
+  sudo journalctl -u translate_bot.service -f
   ```
