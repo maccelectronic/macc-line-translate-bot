@@ -25,6 +25,60 @@ def is_chinese(text: str) -> bool:
     return bool(re.search(r'[\u4e00-\u9fa5]', text))
 
 
+SYSTEM_INSTRUCTION = """You are a strict, automated, direct translation engine for real-time chat between Simplified Chinese (简体中文) and Thai (ภาษาไทย).
+
+CRITICAL DIRECTIVES:
+1. Output ONLY the raw translated text. Absolutely NOTHING else.
+2. Strictly NO explanations, NO notes, NO conversational filler, NO pronunciation guides, NO vocabulary breakdowns.
+3. Strictly NO thoughts, NO internal monologue, NO meta-commentary (e.g., do NOT output "*Wait...", "Let's...", "Actually...", "Translation:").
+4. Strictly NO alternative options or slash choices (such as 'ครับ/ค่ะ', 'ผม/ฉัน'). Select the single most natural, professional, polite wording directly.
+5. If target is Thai, use standard polite Thai without slash choices.
+6. If target is Chinese, strictly use Simplified Chinese (简体中文).
+7. Do NOT wrap the translation in quotation marks unless the original source text was enclosed in quotation marks.
+"""
+
+
+def clean_translation(result: str, original: str) -> str:
+    """
+    清洗模型输出，杜绝任何解释性文字、思考残留或多余引号泄露到群聊中
+    """
+    if not result:
+        return ""
+    lines = [l.strip() for l in result.strip().splitlines() if l.strip()]
+    if not lines:
+        return ""
+
+    content_lines = []
+    for l in lines:
+        if l.startswith(('---', '===', '___')):
+            break
+        lower = l.lower()
+        if any(lower.startswith(p) for p in (
+            '*wait', 'wait,', 'note:', 'notes:', 'explanation:', 'here is', 'translation:',
+            'vocabulary', 'breakdown:', 'role:', 'task:', "let's", 'actually,', 'since gender',
+            'better neutral', 'or neutral:', 'or:'
+        )):
+            continue
+        content_lines.append(l)
+
+    if not content_lines:
+        content_lines = [lines[0]]
+
+    text = "\n".join(content_lines).strip()
+
+    orig = original.strip()
+    orig_quoted = (
+        (orig.startswith('"') and orig.endswith('"')) or
+        (orig.startswith('“') and orig.endswith('”')) or
+        (orig.startswith("'") and orig.endswith("'"))
+    )
+    if not orig_quoted:
+        if (text.startswith('"') and text.endswith('"')) or (text.startswith('“') and text.endswith('”')) or (text.startswith("'") and text.endswith("'")):
+            text = text[1:-1].strip()
+
+    return text
+
+
 class GeminiTranslator:
     """
     Gemini 翻译器封装类 / คลาสจัดการการแปลภาษาด้วย Gemini
@@ -36,7 +90,13 @@ class GeminiTranslator:
         self.model = config.GEMINI_MODEL
         self.fallback_model = config.GEMINI_FALLBACK_MODEL
         self.gen_config = types.GenerateContentConfig(
+            system_instruction=SYSTEM_INSTRUCTION,
+            temperature=0.0,
             thinking_config=types.ThinkingConfig(thinking_budget=0)
+        )
+        self.fallback_gen_config = types.GenerateContentConfig(
+            system_instruction=SYSTEM_INSTRUCTION,
+            temperature=0.0
         )
 
     def translate(self, text: str, target_lang: str) -> str | None:
@@ -46,47 +106,24 @@ class GeminiTranslator:
         :param target_lang: 目标语言 / ภาษาปลายทาง (เช่น 'Simplified Chinese (简体中文)', 'Thai (ภาษาไทย)')
         :return: 翻译结果字符串，失败则返回 None / ข้อความที่แปลแล้ว หรือ None หากล้มเหลว
         """
-        prompt = f"""
-Role: Professional Translator specializing in Simplified Chinese (简体中文) and Thai (ภาษาไทย).
-Task: Translate the following text into {target_lang}.
-
-Constraints:
-1. Output ONLY the translated text without explanations, conversational filler, or notes.
-2. When translating into Chinese, strictly output Simplified Chinese (简体中文).
-3. Accurately maintain the original meaning, tone, emotion, and context.
-4. Do NOT include quotation marks around the output unless present in the original text.
-
-Text to translate:
-"{text}"
-"""
+        prompt = f"Translate to {target_lang}:\n{text}"
         try:
             response = self.client.models.generate_content(
                 model=self.model, contents=prompt, config=self.gen_config
             )
             if response.text:
-                result = response.text.strip()
-                if (result.startswith('"') and result.endswith('"')) or (result.startswith('“') and result.endswith('”')):
-                    result = result[1:-1].strip()
-                return result
+                return clean_translation(response.text, text)
             return None
         except Exception as e:
             print(f"[Gemini 错误 / ข้อผิดพลาด] 主模型 / โมเดลหลัก ({self.model}) 失败: {e}")
             if "404" in str(e) or "not found" in str(e).lower() or "quota" in str(e).lower():
                 print(f"[Gemini 切换 / สลับโมเดล] 自动启用备用模型 / เปลี่ยนเป็นโมเดลสำรอง: {self.fallback_model}...")
                 try:
-                    try:
-                        response = self.client.models.generate_content(
-                            model=self.fallback_model, contents=prompt, config=self.gen_config
-                        )
-                    except Exception:
-                        response = self.client.models.generate_content(
-                            model=self.fallback_model, contents=prompt
-                        )
+                    response = self.client.models.generate_content(
+                        model=self.fallback_model, contents=prompt, config=self.fallback_gen_config
+                    )
                     if response.text:
-                        result = response.text.strip()
-                        if (result.startswith('"') and result.endswith('"')) or (result.startswith('“') and result.endswith('”')):
-                            result = result[1:-1].strip()
-                        return result
+                        return clean_translation(response.text, text)
                     return None
                 except Exception as fallback_e:
                     print(f"[Gemini 备用模型错误 / ข้อผิดพลาดโมเดลสำรอง] {fallback_e}")
